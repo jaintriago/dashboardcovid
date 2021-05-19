@@ -1,0 +1,254 @@
+---
+title: "Untitled"
+author: "Joshelyn Intriago"
+date: "18 de mayo de 2021"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyr)
+library(dplyr)
+library(magrittr)
+library(lubridate)
+library(ggmap)
+```
+
+
+
+```{r cars}
+loc<-read.csv("locations.csv",header=T,sep=",")
+owid <-read.csv("owid-covid-data.csv",header=T,sep=",")
+who <- read.csv("WHO COVID-19 global table data May 10th 2021 at 3.48.04 AM.csv", header=T,sep=",")
+vac <- read.csv("vaccinations-by-manufacturer.csv")
+contact <-read.csv("covid-contact-tracing.csv",header=T,sep=",")
+test_p <- read.csv("covid-19-testing-policy.csv")
+vac_p <- read.csv("covid-vaccination-policy.csv")
+income <- read.csv("income-support-covid.csv")
+school <- read.csv("school-closures-covid.csv")
+work <- read.csv("workplace-closures-covid.csv")
+home <- read.csv("stay-at-home-covid.csv")
+```
+
+#### vamos a recodificar la variable continente porque contiene valores en blancos que correspondes a determinados continentes
+
+```{r pressure, echo=FALSE}
+
+dim(owid)
+str(owid)
+unique(owid$continent)
+unique(owid$iso_code)
+
+owid$continent[owid$iso_code == "OWID_AFR"] <- "Africa"
+owid$continent[owid$iso_code == "OWID_ASI"] <- "Asia"
+owid$continent[owid$iso_code == "OWID_EUN"] <- "Europe"
+owid$continent[owid$iso_code == "OWID_EUR"] <- "Europe"
+owid$continent[owid$iso_code == "OWID_OCE"] <- "Oceania"
+owid$continent[owid$iso_code == "OWID_NAM"] <- "North America"
+owid$continent[owid$iso_code == "OWID_SAM"] <- "South America"
+
+### luego se sacará de la variable location que corresponde a los países las etiquetas de international y world ya que no hacen referencia a ningun pais
+owid <- owid %>% filter(!location %in% c("International" , "World"))
+#write.csv(owid, "C:/Users/andre/Documents/primersemestre uoc/visualizacion/a8/shiny a8/data/owid-covid-data.csv", row.names = F)
+
+
+```
+
+### geo
+### primero vamos a obtener la lista de países en la data para generar coordenadas con ayuda de google maps
+
+```{r}
+owid <-  owid %>% select(location)
+owid <- owid[!duplicated(owid), ]
+owid <- as.data.frame(owid)
+df <- owid %>% filter(!owid %in% c("Africa", "Asia" , "Europe" , "European Union" , "International" ,
+                         "North America" , "Oceania" , "South America" , "World"))
+
+df$owid <- as.character(df$owid)
+register_google(key = "AIzaSyCj2lcM7XmXotibRN6jA9jrdYMN8Fw2thQ")
+df2 <- mutate_geocode(df, owid)
+head(df2)
+#write.csv(df2, "C:/Users/andre/Documents/primersemestre uoc/visualizacion/a8/shiny a8/data/coordenadas.csv", row.names = F)
+
+
+```
+
+#### 
+##### procesamiento de la base locations
+
+```{r}
+str(loc)
+dim(loc)
+head(loc)
+##separar los fabricantes de las vacunas en columnas y luego aplicar un gather para que se coloquen en filas independientes
+data_split = separate(loc, 'vaccines', paste("vaccines", 1:5, sep=""), sep=",", extra="drop")
+data_split <- data_split %>%   gather(`vaccines1`, `vaccines2`, `vaccines3`, `vaccines4`, `vaccines5`, key = "tipo", value = "manufactured")
+data_split <- data_split[!is.na(data_split$manufactured),]
+data_split$manufactured <- trimws(data_split$manufactured)
+unique(data_split$manufactured)
+table(data_split$manufactured)
+#write.csv(data_split, "C:/Users/andre/Documents/primersemestre uoc/visualizacion/a8/shiny a8/data/new_locations.csv", row.names = F)
+
+```
+
+
+### procesamiento para who 
+
+```{r}
+dim(who)
+str(who)
+table(who$Transmission.Classification)
+```
+
+### procesamiento vacunas
+
+```{r}
+dim(vac)
+str(vac)
+table(vac$vaccine)
+table(vac$location)
+aggregate(total_vaccinations ~ vaccine, FUN = sum, data = vac)
+aggregate(total_vaccinations ~ location, FUN = sum, data = vac)
+```
+
+### procresamiento seguimiento de contactos
+```{r}
+
+
+contact$Day <- as.Date(contact$Day)
+zzzzm <- contact %>% select(Entity, Day, contact_tracing) %>% group_by(Entity, contact_tracing) %>% summarise(lasted = max(Day, na.rm = T))
+sss <- zzzzm %>% filter(lasted == max(lasted))
+sss$Entity <- as.character(sss$Entity)
+df2<-read.csv("coordenadas.csv",header=T,sep=",")
+sssv <- sss %>%  left_join(df2, by = c("Entity" = "owid"))
+sssv$contact_tracing <- as.character(sssv$contact_tracing)
+sssv <- sssv[!is.na(sssv$lon),]
+sssv$contact_tracing[sssv$contact_tracing == "0"] <- "Sin seguimiento"
+sssv$contact_tracing[sssv$contact_tracing == "1"] <- "Seguimiento limitado"
+sssv$contact_tracing[sssv$contact_tracing == "2"] <- "Seguimiento integral"
+sssv$contact_tracing <- as.factor(sssv$contact_tracing)
+table(sssv$contact_tracing)
+
+#write.csv(sssv, "C:/Users/andre/Documents/primersemestre uoc/visualizacion/a8/shiny a8/data/covid-contact-tracing.csv", row.names = F)
+
+```
+
+## procesamiento test policy 
+```{r}
+
+test_p$Day <- as.Date(test_p$Day)
+zzzzm <- test_p %>% select(Entity, Day, testing_policy) %>% group_by(Entity, testing_policy) %>% summarise(lasted = max(Day, na.rm = T))
+sss <- zzzzm %>% filter(lasted == max(lasted))
+sssv <- sss %>%  left_join(df2, by = c("Entity" = "owid"))
+sssv <- sssv[!is.na(sssv$lon),]
+sssv$testing_policy <- as.factor(sssv$testing_policy)
+sssv$testing_policy <- as.character(sssv$testing_policy)
+sssv$testing_policy[sssv$testing_policy == "0"] <- "Sin políticas"
+sssv$testing_policy[sssv$testing_policy == "1"] <- "Con sintomas y ciertos grupos"
+sssv$testing_policy[sssv$testing_policy == "2"] <- "Cualquiera con sintomas"
+sssv$testing_policy[sssv$testing_policy == "3"] <- "Pruebas abiertas"
+sssv$testing_policy <- as.factor(sssv$testing_policy)
+table(sssv$testing_policy)
+#write.csv(sssv, "C:/Users/andre/Documents/primersemestre uoc/visualizacion/a8/shiny a8/data/covid-19-testing-policy.csv", row.names = F)
+
+```
+
+### procesamiento  vacunas policy
+```{r}
+### 
+vac_p$Day <- as.Date(vac_p$Day)
+zzzzm <- vac_p %>% select(Entity, Day, vaccination_policy) %>% group_by(Entity, vaccination_policy) %>% summarise(lasted = max(Day, na.rm = T))
+sss <- zzzzm %>% filter(lasted == max(lasted))
+sssv <- sss %>%  left_join(df2, by = c("Entity" = "owid"))
+sssv <- sssv[!is.na(sssv$lon),]
+sssv$vaccination_policy <- as.factor(sssv$vaccination_policy)
+sssv$vaccination_policy <- as.character(sssv$vaccination_policy)
+sssv$vaccination_policy[sssv$vaccination_policy == "0"] <- "Sin políticas"
+sssv$vaccination_policy[sssv$vaccination_policy == "1"] <- "Con sintomas y ciertos grupos"
+sssv$vaccination_policy[sssv$vaccination_policy == "2"] <- "Cualquiera con sintomas"
+sssv$vaccination_policy[sssv$vaccination_policy == "3"] <- "Pruebas abiertas"
+sssv$vaccination_policy <- as.factor(sssv$vaccination_policy)
+table(sssv$vaccination_policy)
+#write.csv(sssv, "C:/Users/andre/Documents/primersemestre uoc/visualizacion/a8/shiny a8/data/covid-vaccination-policy.csv", row.names = F)
+
+```
+
+
+##  procesamiento  income
+```{r}
+##### ----
+income$Day <- as.Date(income$Day)
+zzzzm <- income %>% select(Entity, Day, income_support) %>% group_by(Entity, income_support) %>% summarise(lasted = max(Day, na.rm = T))
+sss <- zzzzm %>% filter(lasted == max(lasted))
+sssv <- sss %>%  left_join(df2, by = c("Entity" = "owid"))
+sssv <- sssv[!is.na(sssv$lon),]
+sssv$income_support <- as.factor(sssv$income_support)
+sssv$income_support <- as.character(sssv$income_support)
+sssv$income_support[sssv$income_support == "0"] <- "Sin apoyo"
+sssv$income_support[sssv$income_support == "1"] <- "Cubre<50% del salario perdido"
+sssv$income_support[sssv$income_support == "2"] <- "Cubre> 50% del salario perdido"
+sssv$income_support <- as.factor(sssv$income_support)
+table(sssv$income_support)
+#write.csv(sssv, "C:/Users/andre/Documents/primersemestre uoc/visualizacion/a8/shiny a8/data/income-support-covid.csv", row.names = F)
+
+```
+
+### procesamiento cierre de escuelas 
+```{r}
+#### -----
+school$Day <- as.Date(school$Day)
+zzzzm <- school %>% select(Entity, Day, school_closures) %>% group_by(Entity, school_closures) %>% summarise(lasted = max(Day, na.rm = T))
+sss <- zzzzm %>% filter(lasted == max(lasted))
+sssv <- sss %>%  left_join(df2, by = c("Entity" = "owid"))
+sssv <- sssv[!is.na(sssv$lon),]
+sssv$school_closures <- as.factor(sssv$school_closures)
+sssv$school_closures <- as.character(sssv$school_closures)
+sssv$school_closures[sssv$school_closures == "0"] <- "Sin medidas"
+sssv$school_closures[sssv$school_closures == "1"] <- "Recomendado"
+sssv$school_closures[sssv$school_closures == "2"] <- "Requerido-algunos niveles"
+sssv$school_closures[sssv$school_closures == "3"] <- "Requerido-para todos"
+sssv$school_closures <- as.factor(sssv$school_closures)
+table(sssv$school_closures)
+#write.csv(sssv, "C:/Users/andre/Documents/primersemestre uoc/visualizacion/a8/shiny a8/data/school-closures-covid.csv", row.names = F)
+
+```
+
+## procesamiento cierre de trabajo
+```{r}
+####  ----
+work$Day <- as.Date(work$Day)
+zzzzm <- work %>% select(Entity, Day, workplace_closures) %>% group_by(Entity, workplace_closures) %>% summarise(lasted = max(Day, na.rm = T))
+sss <- zzzzm %>% filter(lasted == max(lasted))
+sssv <- sss %>%  left_join(df2, by = c("Entity" = "owid"))
+sssv <- sssv[!is.na(sssv$lon),]
+sssv$workplace_closures <- as.factor(sssv$workplace_closures)
+sssv$workplace_closures <- as.character(sssv$workplace_closures)
+sssv$workplace_closures[sssv$workplace_closures == "0"] <- "Sin medidas"
+sssv$workplace_closures[sssv$workplace_closures == "1"] <- "Recomendado"
+sssv$workplace_closures[sssv$workplace_closures == "2"] <- "Requerido-algunos"
+sssv$workplace_closures[sssv$workplace_closures == "3"] <- "Requerido-para todos menos trabajos claves"
+sssv$workplace_closures <- as.factor(sssv$workplace_closures)
+table(sssv$workplace_closures)
+#write.csv(sssv, "C:/Users/andre/Documents/primersemestre uoc/visualizacion/a8/shiny a8/data/workplace-closures-covid.csv", row.names = F)
+
+```
+
+## procesamiento requermiento de quedarse en casa
+```{r}
+home$Day <- as.Date(home$Day)
+zzzzm <- home %>% select(Entity, Day, stay_home_requirements) %>% group_by(Entity, stay_home_requirements) %>% summarise(lasted = max(Day, na.rm = T))
+sss <- zzzzm %>% filter(lasted == max(lasted))
+sssv <- sss %>%  left_join(df2, by = c("Entity" = "owid"))
+sssv <- sssv[!is.na(sssv$lon),]
+sssv$stay_home_requirements <- as.factor(sssv$stay_home_requirements)
+sssv$stay_home_requirements <- as.character(sssv$stay_home_requirements)
+sssv$stay_home_requirements[sssv$stay_home_requirements == "0"] <- "Sin medidas"
+sssv$stay_home_requirements[sssv$stay_home_requirements == "1"] <- "Recomendado"
+sssv$stay_home_requirements[sssv$stay_home_requirements == "2"] <- "Casos esenciales"
+sssv$stay_home_requirements[sssv$stay_home_requirements == "3"] <- "Todos menos pocas excepciones"
+sssv$stay_home_requirements <- as.factor(sssv$stay_home_requirements)
+table(sssv$stay_home_requirements)
+#write.csv(sssv, "C:/Users/andre/Documents/primersemestre uoc/visualizacion/a8/shiny a8/data/stay_home_requirements.csv", row.names = F)
+
+```
+
